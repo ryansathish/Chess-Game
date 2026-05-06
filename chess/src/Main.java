@@ -1,20 +1,22 @@
-import game.Game;
+import gui.ChessGUI;
+import javax.swing.SwingUtilities;
 
 /**
- * Entry point for the Console Chess application.
- * <p>
- * Creates a new {@link Game} instance and starts the game loop.
- * </p>
+ * Entry point for the Phase 2 Chess GUI application.
  */
 public class Main {
-
     /**
-     * Main method — launches the chess game.
+     * Launches the chess GUI on the Swing event dispatch thread.
      *
-     * @param args command-line arguments (not used)
+     * @param args command-line arguments (unused)
      */
     public static void main(String[] args) {
-        Game game = new Game();
-        game.play();
+        SwingUtilities.invokeLater(() -> {
+            try {
+                javax.swing.UIManager.setLookAndFeel(
+                    javax.swing.UIManager.getSystemLookAndFeelClassName());
+            } catch (Exception ignored) {}
+            new ChessGUI();
+        });
     }
 }
