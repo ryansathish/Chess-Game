@@ -1,5 +1,6 @@
 package gui;
 
+import ai.ChessAI;
 import board.Board;
 import pieces.*;
 import utils.Position;
@@ -47,6 +48,12 @@ public class ChessBoardPanel extends JPanel {
     /** Hook called just before a move is executed (for undo snapshot). */
     private Runnable preMoveHook;
 
+    /** Optional AI engine; null when playing human vs human. */
+    private ChessAI chessAI;
+
+    /** Whether the AI is currently computing its move (blocks input). */
+    private boolean aiThinking = false;
+
     /** Light square color. */
     private Color lightColor = new Color(240, 217, 181);
 
@@ -91,6 +98,16 @@ public class ChessBoardPanel extends JPanel {
      */
     public void setPreMoveHook(Runnable hook) {
         this.preMoveHook = hook;
+    }
+
+    /**
+     * Sets the AI engine. Pass {@code null} to disable AI (human vs human).
+     * When set, after each human move the AI automatically plays its response.
+     *
+     * @param ai the {@link ChessAI} to use, or null for human vs human
+     */
+    public void setChessAI(ChessAI ai) {
+        this.chessAI = ai;
     }
 
     /**
@@ -273,22 +290,20 @@ public class ChessBoardPanel extends JPanel {
 
     /**
      * Attempts to move a piece from {@code from} to {@code to}.
-     * Fires the move listener on success.
+     * Fires the move listener on success, then triggers the AI if configured.
      *
      * @param from the source position
      * @param to   the destination position
      */
     private void attemptMove(Position from, Position to) {
+        if (aiThinking) return; // Block input while AI computes
         Piece piece = board.getPiece(from);
         if (piece == null || piece.getColor() != currentTurn) return;
 
         // Check destination is in possible moves
         boolean validDest = false;
         for (Position p : piece.possibleMoves(board.getGrid())) {
-            if (p.equals(to)) {
-                validDest = true;
-                break;
-            }
+            if (p.equals(to)) { validDest = true; break; }
         }
         if (!validDest) return;
 
@@ -301,8 +316,7 @@ public class ChessBoardPanel extends JPanel {
         // Execute move
         Piece captured = board.movePiece(from, to);
 
-        // Handle pawn promotion (auto-promote to Queen for GUI simplicity;
-        // a dialog could be added for full promotion choice)
+        // Handle pawn promotion
         handlePromotion(to, currentTurn);
 
         // Notify listener
@@ -317,22 +331,116 @@ public class ChessBoardPanel extends JPanel {
         if (board.isCheckmate(opponent)) {
             repaint();
             String winner = (currentTurn == Piece.Color.WHITE) ? "White" : "Black";
-            JOptionPane.showMessageDialog(this,
-                    winner + " wins by Checkmate!",
-                    "Game Over",
-                    JOptionPane.INFORMATION_MESSAGE);
+            JOptionPane.showMessageDialog(this, winner + " wins by Checkmate!",
+                    "Game Over", JOptionPane.INFORMATION_MESSAGE);
             if (moveListener != null) moveListener.onGameOver(currentTurn);
+            return;
         } else if (board.isStalemate(opponent)) {
             repaint();
-            JOptionPane.showMessageDialog(this,
-                    "Stalemate! The game is a draw.",
-                    "Game Over",
-                    JOptionPane.INFORMATION_MESSAGE);
+            JOptionPane.showMessageDialog(this, "Stalemate! The game is a draw.",
+                    "Game Over", JOptionPane.INFORMATION_MESSAGE);
             if (moveListener != null) moveListener.onGameOver(null);
-        } else {
-            currentTurn = opponent;
-            repaint();
+            return;
         }
+
+        currentTurn = opponent;
+        repaint();
+
+        // Trigger AI if it's the AI's turn
+        if (chessAI != null && chessAI.getColor() == currentTurn && gameActive()) {
+            scheduleAIMove();
+        }
+    }
+
+    /**
+     * Returns true if the game is still active (no game-over condition).
+     *
+     * @return true if game is ongoing
+     */
+    private boolean gameActive() {
+        return !board.isCheckmate(currentTurn) && !board.isStalemate(currentTurn);
+    }
+
+    /**
+     * Schedules an AI move on a background thread to avoid blocking the EDT.
+     * Shows a "thinking" cursor while computing.
+     */
+    private void scheduleAIMove() {
+        aiThinking = true;
+        setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
+
+        SwingWorker<ChessAI.Move, Void> worker = new SwingWorker<>() {
+            @Override
+            protected ChessAI.Move doInBackground() {
+                return chessAI.getBestMove(board);
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    ChessAI.Move aiMove = get();
+                    if (aiMove != null) {
+                        executeAIMove(aiMove);
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                } finally {
+                    aiThinking = false;
+                    setCursor(Cursor.getDefaultCursor());
+                    repaint();
+                }
+            }
+        };
+        worker.execute();
+    }
+
+    /**
+     * Executes an AI move on the board, updating state and notifying listeners.
+     *
+     * @param move the AI's chosen move
+     */
+    private void executeAIMove(ChessAI.Move move) {
+        Piece piece = board.getPiece(move.from);
+        if (piece == null) return;
+
+        if (preMoveHook != null) preMoveHook.run();
+
+        Piece captured = board.movePiece(move.from, move.to);
+
+        // Auto-promote AI pawns to Queen
+        Piece moved = board.getGrid()[move.to.getRow()][move.to.getCol()];
+        if (moved instanceof Pawn) {
+            int backRank = (moved.getColor() == Piece.Color.WHITE) ? 0 : 7;
+            if (move.to.getRow() == backRank) {
+                board.getGrid()[move.to.getRow()][move.to.getCol()] =
+                        new Queen(moved.getColor(), move.to);
+            }
+        }
+
+        if (moveListener != null) {
+            moveListener.onMove(piece, move.from, move.to, captured, currentTurn);
+        }
+
+        Piece.Color opponent = (currentTurn == Piece.Color.WHITE)
+                ? Piece.Color.BLACK : Piece.Color.WHITE;
+
+        if (board.isCheckmate(opponent)) {
+            repaint();
+            String winner = (currentTurn == Piece.Color.WHITE) ? "White" : "Black";
+            JOptionPane.showMessageDialog(this, winner + " wins by Checkmate!",
+                    "Game Over", JOptionPane.INFORMATION_MESSAGE);
+            if (moveListener != null) moveListener.onGameOver(currentTurn);
+            return;
+        } else if (board.isStalemate(opponent)) {
+            repaint();
+            JOptionPane.showMessageDialog(this, "Stalemate! The game is a draw.",
+                    "Game Over", JOptionPane.INFORMATION_MESSAGE);
+            if (moveListener != null) moveListener.onGameOver(null);
+            return;
+        }
+
+        currentTurn = opponent;
+        repaint();
     }
 
     /**

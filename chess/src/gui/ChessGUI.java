@@ -1,5 +1,6 @@
 package gui;
 
+import ai.ChessAI;
 import board.Board;
 import pieces.Piece;
 import utils.Position;
@@ -36,11 +37,17 @@ public class ChessGUI extends JFrame {
     /** Whether the game is currently active (not over). */
     private boolean gameActive = true;
 
+    /** The AI engine; null = human vs human mode. */
+    private ChessAI chessAI = null;
+
+    /** Menu item for toggling AI mode (stored so we can update its label). */
+    private JMenuItem aiToggleItem;
+
     /**
      * Constructs and displays the main Chess GUI window.
      */
     public ChessGUI() {
-        super("Chess – Phase 2");
+        super("Chess – Phase 3  [Human vs Human]");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLayout(new BorderLayout(0, 0));
 
@@ -113,6 +120,26 @@ public class ChessGUI extends JFrame {
         newGameItem.setAccelerator(KeyStroke.getKeyStroke("ctrl N"));
         newGameItem.addActionListener(e -> newGame());
 
+        // AI Mode submenu
+        JMenu aiMenu = new JMenu("AI Opponent");
+        ButtonGroup aiGroup = new ButtonGroup();
+
+        JRadioButtonMenuItem humanItem = new JRadioButtonMenuItem("Human vs Human", true);
+        JRadioButtonMenuItem easyItem  = new JRadioButtonMenuItem("Easy (depth 2)");
+        JRadioButtonMenuItem medItem   = new JRadioButtonMenuItem("Medium (depth 3)");
+        JRadioButtonMenuItem hardItem  = new JRadioButtonMenuItem("Hard (depth 4)");
+
+        aiGroup.add(humanItem); aiGroup.add(easyItem);
+        aiGroup.add(medItem);   aiGroup.add(hardItem);
+
+        humanItem.addActionListener(e -> setAIMode(null,   0));
+        easyItem .addActionListener(e -> setAIMode(Piece.Color.BLACK, 2));
+        medItem  .addActionListener(e -> setAIMode(Piece.Color.BLACK, 3));
+        hardItem .addActionListener(e -> setAIMode(Piece.Color.BLACK, 4));
+
+        aiMenu.add(humanItem); aiMenu.add(easyItem);
+        aiMenu.add(medItem);   aiMenu.add(hardItem);
+
         JMenuItem saveItem = new JMenuItem("Save Game");
         saveItem.setAccelerator(KeyStroke.getKeyStroke("ctrl S"));
         saveItem.addActionListener(e -> saveGame());
@@ -125,6 +152,8 @@ public class ChessGUI extends JFrame {
         exitItem.addActionListener(e -> System.exit(0));
 
         gameMenu.add(newGameItem);
+        gameMenu.addSeparator();
+        gameMenu.add(aiMenu);
         gameMenu.addSeparator();
         gameMenu.add(saveItem);
         gameMenu.add(loadItem);
@@ -147,10 +176,14 @@ public class ChessGUI extends JFrame {
         JMenu helpMenu = new JMenu("Help");
         JMenuItem aboutItem = new JMenuItem("About");
         aboutItem.addActionListener(e -> JOptionPane.showMessageDialog(this,
-                "Chess – Phase 2\n\nTwo-player chess with GUI.\n\n"
+                "Chess – Phase 3\n\nFully integrated GUI chess game with AI opponent.\n\n"
                 + "How to play:\n"
                 + "  • Click a piece then click its destination, OR\n"
                 + "  • Drag a piece to its destination.\n\n"
+                + "AI Opponent:\n"
+                + "  • Game → AI Opponent → Easy / Medium / Hard\n"
+                + "  • You play White; AI plays Black.\n"
+                + "  • AI uses Minimax with Alpha-Beta Pruning.\n\n"
                 + "Extra features:\n"
                 + "  • Move history with undo (right panel)\n"
                 + "  • Board customization (View → Settings)\n"
@@ -163,6 +196,26 @@ public class ChessGUI extends JFrame {
     }
 
     /**
+     * Activates or deactivates the AI opponent.
+     *
+     * @param color the color for the AI to play, or null for human vs human
+     * @param depth the minimax search depth
+     */
+    private void setAIMode(Piece.Color color, int depth) {
+        if (color == null) {
+            chessAI = null;
+            boardPanel.setChessAI(null);
+            setTitle("Chess – Phase 3  [Human vs Human]");
+        } else {
+            chessAI = new ChessAI(color, depth);
+            boardPanel.setChessAI(chessAI);
+            String label = (depth == 2) ? "Easy" : (depth == 3) ? "Medium" : "Hard";
+            setTitle("Chess – Phase 3  [You: White  vs  AI: Black  (" + label + ")]");
+        }
+        newGame();
+    }
+
+    /**
      * Starts a new game, resetting the board and history.
      */
     private void newGame() {
@@ -172,6 +225,7 @@ public class ChessGUI extends JFrame {
         if (choice != JOptionPane.YES_OPTION) return;
 
         boardPanel.resetBoard();
+        boardPanel.setChessAI(chessAI); // re-apply AI after reset
         historyPanel.reset();
         undoStack.clear();
         gameActive = true;
